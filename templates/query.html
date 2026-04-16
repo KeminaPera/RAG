@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>查询文档</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .header {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            margin-bottom: 20px;
+        }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #667eea;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+        p {
+            color: #666;
+            margin-bottom: 20px;
+        }
+        .search-box {
+            display: flex;
+            gap: 10px;
+        }
+        .search-input {
+            flex: 1;
+            padding: 14px 18px;
+            border: 2px solid #eee;
+            border-radius: 12px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+        .search-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .search-btn {
+            padding: 14px 30px;
+            border: none;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 16px;
+        }
+        .search-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+        .results {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 30px;
+        }
+        .results-header {
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #eee;
+        }
+        .results-count {
+            color: #666;
+            font-size: 14px;
+        }
+        .result-card {
+            background: #f8f9ff;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-left: 4px solid #667eea;
+        }
+        .result-content {
+            color: #333;
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }
+        .result-metadata {
+            color: #999;
+            font-size: 12px;
+        }
+        .no-results {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+        .flash-messages {
+            margin-bottom: 20px;
+        }
+        .flash-error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        .answer-box {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 30px;
+            margin-bottom: 20px;
+        }
+        .answer-title {
+            margin: 0 0 12px 0;
+            color: #333;
+            font-size: 18px;
+        }
+        .answer-text {
+            white-space: pre-wrap;
+            line-height: 1.7;
+            color: #222;
+        }
+        .sources {
+            margin-top: 16px;
+            border-top: 1px solid #eee;
+            padding-top: 12px;
+        }
+        .source-item {
+            font-size: 13px;
+            color: #555;
+            margin-bottom: 8px;
+        }
+        .source-item code {
+            background: #f2f4ff;
+            padding: 2px 6px;
+            border-radius: 6px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a href="/" class="back-link">← 返回首页</a>
+            
+            <h1>🔍 查询文档</h1>
+            <p>输入关键词，系统将检索相似的文档内容</p>
+            
+            <div class="flash-messages">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="flash-{{ category }}">{{ message }}</div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+            </div>
+            
+            <form class="search-box" method="POST">
+                <input type="text" class="search-input" name="query" placeholder="输入查询关键词..." required>
+                <button type="submit" class="search-btn">搜索</button>
+            </form>
+        </div>
+
+        {% if answer %}
+            <div class="answer-box">
+                <h2 class="answer-title">🧠 大模型分析结果</h2>
+                <div class="answer-text">{{ answer }}</div>
+                {% if sources %}
+                    <div class="sources">
+                        <div style="font-weight: 600; color:#333; margin-bottom: 10px;">引用来源</div>
+                        {% for s in sources %}
+                            <div class="source-item">
+                                <code>[{{ s.id }}]</code>
+                                {{ s.source_file if s.source_file else '未知文件' }}
+                                {% if s.chunk_id is not none %}（chunk {{ s.chunk_id }}）{% endif %}
+                                {% if s.page is not none %}（page {{ s.page }}）{% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+        
+        <div class="results">
+            {% if results %}
+                <div class="results-header">
+                    <h2>搜索结果</h2>
+                    <div class="results-count">找到 {{ results|length }} 条相关结果</div>
+                </div>
+                
+                {% for result in results %}
+                    <div class="result-card">
+                        <div class="result-content">{{ result.content }}</div>
+                        {% if result.metadata %}
+                            <div class="result-metadata">
+                                {% for key, value in result.metadata.items() %}
+                                    {{ key }}: {{ value }}
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            {% else %}
+                <div class="no-results">
+                    <div style="font-size: 48px; margin-bottom: 15px;">📭</div>
+                    <p>暂无搜索结果</p>
+                    <p style="font-size: 14px; color: #bbb;">请先上传文档，然后再进行查询</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

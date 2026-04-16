@@ -1,0 +1,13 @@
+{
+  "__version__": {
+    "sentence_transformers": "2.7.0",
+    "transformers": "4.38.2",
+    "pytorch": "2.2.1"
+  },
+  "prompts": {},
+  "default_prompt_name": null,
+  "similarity_fn_name": null,
+  "normalize_embeddings": true,
+  "max_seq_length": 512,
+  "prompts_server_endpoint": null
+}

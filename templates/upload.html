@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>上传文档</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 24px;
+            text-align: center;
+        }
+        p {
+            color: #666;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #667eea;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        .upload-area {
+            border: 2px dashed #ddd;
+            border-radius: 12px;
+            padding: 40px 20px;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        .upload-area:hover, .upload-area.dragover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+        .upload-text {
+            color: #555;
+            margin-bottom: 10px;
+        }
+        .upload-hint {
+            color: #999;
+            font-size: 14px;
+        }
+        #file-input {
+            display: none;
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            margin-top: 20px;
+            border: none;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .flash-messages {
+            margin-bottom: 20px;
+        }
+        .flash-success {
+            background: #d4edda;
+            color: #155724;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        .flash-error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        .progress {
+            margin-top: 20px;
+            height: 8px;
+            background: #eee;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="back-link">← 返回首页</a>
+        
+        <h1>📤 上传文档</h1>
+        <p>支持 PDF (.pdf) 和 Word (.docx) 文件</p>
+        
+        <div class="flash-messages">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="flash-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+        </div>
+        
+        <form id="upload-form" method="POST" enctype="multipart/form-data">
+            <label for="file-input" class="upload-area" id="upload-area">
+                <div class="upload-icon">📁</div>
+                <div class="upload-text" id="upload-text">点击或拖拽文件到此处</div>
+                <div class="upload-hint">支持 PDF (.pdf) 和 Word (.docx) 格式</div>
+            </label>
+            <input type="file" id="file-input" name="file" accept=".pdf,.docx">
+            
+            <button type="submit" class="btn" id="submit-btn" disabled>
+                上传并处理
+            </button>
+            
+            <div class="progress" id="progress" style="display: none;">
+                <div class="progress-bar" id="progress-bar"></div>
+            </div>
+        </form>
+    </div>
+    
+    <script>
+        const fileInput = document.getElementById('file-input');
+        const uploadArea = document.getElementById('upload-area');
+        const uploadText = document.getElementById('upload-text');
+        const submitBtn = document.getElementById('submit-btn');
+        const progress = document.getElementById('progress');
+        const progressBar = document.getElementById('progress-bar');
+        
+        // 不要用 JS 再调 fileInput.click()：<label for="file-input"> 已会触发选择器，
+        // 重复调用会导致一次点击打开两次对话框或覆盖首次选择，表现为要选两次文件。
+        
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                const file = files[0];
+                try {
+                    const dt = new DataTransfer();
+                    dt.items.add(file);
+                    fileInput.files = dt.files;
+                } catch (err) {
+                    /* 旧浏览器无 DataTransfer 时仅更新 UI，提交仍依赖点击选择 */
+                }
+                handleFile(file);
+            }
+        });
+        
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+        
+        function handleFile(file) {
+            const allowedTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+            const name = (file.name || '').toLowerCase();
+            const okByExt = name.endsWith('.pdf') || name.endsWith('.docx');
+            const okByMime = file.type && allowedTypes.includes(file.type);
+            if (!okByMime && !okByExt) {
+                alert('请上传 PDF 或 Word 文档');
+                return;
+            }
+            uploadText.textContent = `已选择: ${file.name}`;
+            submitBtn.disabled = false;
+        }
+        
+        document.getElementById('upload-form').addEventListener('submit', (e) => {
+            submitBtn.disabled = true;
+            progress.style.display = 'block';
+            progressBar.style.width = '50%';
+        });
+    </script>
+</body>
+</html>
