@@ -306,4 +306,6 @@ def secure_filename(filename):
     return sanitized
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # Disable debug mode to prevent dual-process memory issue
+    # Debug mode creates a reloader process that doubles memory usage
+    app.run(debug=False, host='0.0.0.0', port=5000)

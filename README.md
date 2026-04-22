@@ -6,7 +6,6 @@
 
 ```
 ├── app.py                 # Flask Web 应用入口
-├── start_app.py           # 启动脚本
 ├── requirements.txt       # 依赖清单（版本锁定）
 ├── .env                   # 环境配置（API密钥等敏感信息）
 ├── .gitignore             # Git忽略规则
@@ -16,7 +15,9 @@
 ├── llm_client.py          # 大模型客户端
 ├── memory_manager.py      # 三层记忆管理模块
 ├── logging_config.py      # 日志配置模块
-├── download_reranker.py   # 模型下载工具脚本
+├── scripts/               # 辅助脚本目录
+│   ├── start_app.py       # 应用启动脚本
+│   └── download_reranker.py  # 模型下载工具
 ├── templates/             # HTML 模板
 │   ├── index.html         # 首页
 │   ├── upload.html        # 文档上传页面
@@ -190,7 +191,7 @@ uv pip install -r requirements.txt
 uv run python app.py
 
 # 方式3：使用启动脚本
-.venv\Scripts\python.exe start_app.py
+.venv\Scripts\python.exe scripts\start_app.py
 ```
 
 服务启动后访问：http://localhost:5000 或 http://127.0.0.1:5000
