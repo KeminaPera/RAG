@@ -7,14 +7,14 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from langchain.memory import ConversationSummaryBufferMemory
-from langchain.schema import Document
-from langchain.chat_models import ChatOpenAI
+from langchain_core.documents import Document
+from langchain_openai import ChatOpenAI
 from embeddings import EmbeddingFactory
 
 try:
     from langchain.memory import VectorStoreRetrieverMemory
-    from langchain.chains import LLMChain
-    from langchain.prompts import PromptTemplate
+    from langchain_community.chains import LLMChain
+    from langchain_core.prompts import PromptTemplate
     VECTOR_MEMORY_AVAILABLE = True
 except ImportError:
     VECTOR_MEMORY_AVAILABLE = False
@@ -55,14 +55,14 @@ class ShortTermMemory:
         from llm_client import load_llm_config, chat_completion
         cfg = load_llm_config()
         if cfg.provider == "ollama":
-            from langchain.chat_models import ChatOllama
+            from langchain_ollama import ChatOllama
             return ChatOllama(model=cfg.model, base_url=cfg.base_url)
         else:
-            from langchain.chat_models import ChatOpenAI
+            from langchain_openai import ChatOpenAI
             return ChatOpenAI(
                 model=cfg.model,
-                openai_api_base=cfg.base_url,
-                openai_api_key=cfg.api_key,
+                base_url=cfg.base_url,
+                api_key=cfg.api_key,
                 temperature=0,
                 max_tokens=500,
             )

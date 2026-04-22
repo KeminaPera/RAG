@@ -3,6 +3,10 @@ import sys
 from typing import List, Tuple, Any
 from logging_config import get_logger
 
+# CRITICAL: Disable parallelism to prevent segmentation fault on Windows
+os.environ["TOKENIZERS_PARALLELISM"] = "false"  # Disable tokenizer parallelism
+os.environ["OMP_NUM_THREADS"] = "1"             # Force single thread for OpenMP
+
 logger = get_logger(__name__)
 
 try:

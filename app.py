@@ -7,8 +7,18 @@ import math
 import uuid
 from pathlib import Path
 from dotenv import load_dotenv
-from langchain.text_splitter import CharacterTextSplitter
-from langchain.schema import Document
+
+# CRITICAL: Disable parallelism to prevent segmentation fault on Windows
+# Must be set before importing torch, transformers, or sentence-transformers
+os.environ["TOKENIZERS_PARALLELISM"] = "false"  # Disable tokenizer parallelism
+os.environ["OMP_NUM_THREADS"] = "1"             # Force single thread for OpenMP
+os.environ["MKL_NUM_THREADS"] = "1"             # Disable MKL threading
+os.environ["OPENBLAS_NUM_THREADS"] = "1"        # Disable OpenBLAS threading
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"      # Disable vecLib threading
+os.environ["NUMEXPR_NUM_THREADS"] = "1"         # Disable numexpr threading
+
+from langchain_text_splitters import CharacterTextSplitter
+from langchain_core.documents import Document
 from rag_service import answer_with_rag, retrieve_and_rerank
 from embeddings import EmbeddingFactory
 from logging_config import setup_logging, get_logger
@@ -127,13 +137,13 @@ def get_embeddings():
 def load_document(file_path):
     if file_path.endswith('.pdf'):
         try:
-            from langchain.document_loaders import PyPDFLoader
+            from langchain_community.document_loaders import PyPDFLoader
         except ImportError as exc:
             raise RuntimeError("缺少 pypdf 依赖。请运行 `pip install pypdf`") from exc
         loader = PyPDFLoader(file_path)
     elif file_path.endswith('.docx'):
         try:
-            from langchain.document_loaders import Docx2txtLoader
+            from langchain_community.document_loaders import Docx2txtLoader
         except ImportError as exc:
             raise RuntimeError("缺少 python-docx 依赖。请运行 `pip install python-docx`") from exc
         loader = Docx2txtLoader(file_path)

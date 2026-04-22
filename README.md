@@ -44,14 +44,16 @@
 | 分类 | 技术 | 版本 | 说明 |
 |------|------|------|------|
 | Web 框架 | Flask | 3.1.3 | 轻量级 Web 框架 |
-| 向量数据库 | ChromaDB | 0.4.22 | 轻量级向量存储 |
+| 向量数据库 | ChromaDB | 0.5.0 | 轻量级向量存储 |
 | 嵌入模型 | BAAI/bge-small-zh-v1.5 | - | 中文语义嵌入（本地） |
 | 重排序模型 | BAAI/bge-reranker-base | - | 检索结果重排序（本地） |
-| LLM 框架 | LangChain | 0.1.10 | 大语言模型编排 |
-| 文档解析 | pypdf / python-docx | 6.10.2 / 1.2.0 | PDF/Word 解析 |
-| 深度学习 | PyTorch | 2.2.1 (CPU) | 模型推理框架 |
-| Transformer | Transformers | 4.38.2 | HuggingFace 模型库 |
-| 向量化 | Sentence-Transformers | 2.5.1 | 文本嵌入生成 |
+| LLM 框架 | LangChain | 0.2.15 | 大语言模型编排 |
+| LangChain Core | langchain-core | 0.2.38 | LangChain 核心组件 |
+| LangChain OpenAI | langchain-openai | 0.1.23 | OpenAI 集成 |
+| 文档解析 | pypdf / python-docx | 6.1.0 / 1.2.0 | PDF/Word 解析 |
+| 深度学习 | PyTorch | 2.2.0 (CPU) | 模型推理框架 |
+| Transformer | Transformers | 4.41.1 | HuggingFace 模型库 |
+| 向量化 | Sentence-Transformers | 2.7.0 | 文本嵌入生成 |
 | 记忆系统 | 三层记忆架构 | - | 短期/实体/长期记忆 |
 
 **环境要求**：Python >= 3.11
@@ -157,22 +159,24 @@ MEMORY_ENTITY_TOP_K=5
 ```bash
 # 方式1：使用 pip（推荐）
 # 先安装 PyTorch CPU 版本（避免 CUDA 依赖问题）
-pip install torch==2.2.1+cpu torchvision==0.17.1+cpu --index-url https://download.pytorch.org/whl/cpu
+pip install torch==2.2.0+cpu torchvision==0.17.0+cpu --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements.txt
 
-# 方式2：使用 uv
-uv pip install torch==2.2.1+cpu torchvision==0.17.1+cpu --index-url https://download.pytorch.org/whl/cpu
-uv pip install -r requirements.txt
+# 方式2：使用虚拟环境
+python -m venv .venv
+.venv\Scripts\activate
+pip install torch==2.2.0+cpu torchvision==0.17.0+cpu --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements.txt
 ```
 
 **依赖版本说明**：
 - Python >= 3.11
-- LangChain 0.1.10（使用旧版 API，避免 0.2+ 破坏性变更）
-- PyTorch 2.2.1（CPU 版本，无需显卡）
-- Transformers 4.38.2
-- Sentence-Transformers 2.5.1
+- LangChain 0.2.15（稳定版本，已迁移新 API）
+- PyTorch 2.2.0（CPU 版本，无需显卡）
+- Transformers 4.41.1
+- Sentence-Transformers 2.7.0
 
-所有依赖版本已锁定，确保兼容性。
+所有依赖版本已锁定，确保兼容性和稳定性。
 
 ### 下载模型
 
@@ -187,14 +191,16 @@ uv pip install -r requirements.txt
 # 方式1：使用虚拟环境运行（推荐）
 .venv\Scripts\python.exe app.py
 
-# 方式2：使用 uv
-uv run python app.py
-
-# 方式3：使用启动脚本
+# 方式2：使用启动脚本
 .venv\Scripts\python.exe scripts\start_app.py
 ```
 
 服务启动后访问：http://localhost:5000 或 http://127.0.0.1:5000
+
+**Windows 用户注意事项**：
+- 应用已内置多线程禁用配置，防止段错误
+- 如遇到 `OSError 1455`（页面文件太小），请增加 Windows 虚拟内存到 8-16GB
+- 设置路径：系统属性 → 高级 → 性能 → 虚拟内存 → 更改
 
 ## API 接口
 
@@ -246,3 +252,5 @@ uv run python app.py
 4. **智能记忆管理**: 短期记忆使用 ConversationSummaryBufferMemory，支持自动摘要压缩和淘汰机制，避免内存溢出
 5. **日志完善**: 完整记录检索、重排序、回答生成全过程
 6. **容错机制**: 支持嵌入模型回退到 Hash 方法
+7. **Windows 稳定性优化**: 禁用多线程并行，防止段错误和内存访问冲突
+8. **LangChain 0.2.x**: 升级到最新稳定版本，使用新的导入路径和 API
