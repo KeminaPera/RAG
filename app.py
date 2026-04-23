@@ -1,13 +1,24 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, session
 from flask import jsonify
 import os
 import hashlib
 import json
 import math
+import uuid
 from pathlib import Path
 from dotenv import load_dotenv
-from langchain.text_splitter import CharacterTextSplitter
-from langchain.schema import Document
+
+# CRITICAL: Disable parallelism to prevent segmentation fault on Windows
+# Must be set before importing torch, transformers, or sentence-transformers
+os.environ["TOKENIZERS_PARALLELISM"] = "false"  # Disable tokenizer parallelism
+os.environ["OMP_NUM_THREADS"] = "1"             # Force single thread for OpenMP
+os.environ["MKL_NUM_THREADS"] = "1"             # Disable MKL threading
+os.environ["OPENBLAS_NUM_THREADS"] = "1"        # Disable OpenBLAS threading
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"      # Disable vecLib threading
+os.environ["NUMEXPR_NUM_THREADS"] = "1"         # Disable numexpr threading
+
+from langchain_text_splitters import CharacterTextSplitter
+from langchain_core.documents import Document
 from rag_service import answer_with_rag, retrieve_and_rerank
 from embeddings import EmbeddingFactory
 from logging_config import setup_logging, get_logger
@@ -20,10 +31,42 @@ app = Flask(__name__)
 app.secret_key = 'supersecretkey'
 app.config['UPLOAD_FOLDER'] = os.getenv('UPLOAD_FOLDER', './uploads')
 app.config['CHROMA_DB_PATH'] = os.getenv('CHROMA_DB_PATH', './chromadb')
+app.config['PERMANENT_SESSION_LIFETIME'] = 3600
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['CHROMA_DB_PATH'], exist_ok=True)
 
 app_logger = get_logger('app')
+
+try:
+    from memory_manager import MemoryManager
+    MEMORY_ENABLED = True
+    app_logger.info("Memory Manager 模块加载成功")
+except ImportError as e:
+    MEMORY_ENABLED = False
+    app_logger.warning(f"Memory Manager 模块加载失败: {e}")
+
+# Preload reranker at startup to avoid first-request delay
+try:
+    from rag_service import get_reranker, RERANKER_AVAILABLE
+    if RERANKER_AVAILABLE:
+        app_logger.info("正在预加载 Reranker 模型...")
+        _ = get_reranker()
+        app_logger.info("Reranker 模型预加载完成")
+except Exception as e:
+    app_logger.warning(f"Reranker 预加载失败: {e}")
+
+memory_managers = {}
+
+def get_memory_manager(session_id: str) -> MemoryManager:
+    if session_id not in memory_managers:
+        memory_managers[session_id] = MemoryManager(session_id)
+    return memory_managers[session_id]
+
+def get_or_create_session_id():
+    if 'session_id' not in session:
+        session['session_id'] = str(uuid.uuid4())
+        session.permanent = True
+    return session['session_id']
 
 class SimpleVectorDB:
     def __init__(self, persist_directory, collection_name, embedding_function):
@@ -94,13 +137,13 @@ def get_embeddings():
 def load_document(file_path):
     if file_path.endswith('.pdf'):
         try:
-            from langchain.document_loaders import PyPDFLoader
+            from langchain_community.document_loaders import PyPDFLoader
         except ImportError as exc:
             raise RuntimeError("缺少 pypdf 依赖。请运行 `pip install pypdf`") from exc
         loader = PyPDFLoader(file_path)
     elif file_path.endswith('.docx'):
         try:
-            from langchain.document_loaders import Docx2txtLoader
+            from langchain_community.document_loaders import Docx2txtLoader
         except ImportError as exc:
             raise RuntimeError("缺少 python-docx 依赖。请运行 `pip install python-docx`") from exc
         loader = Docx2txtLoader(file_path)
@@ -188,22 +231,80 @@ def query():
         query_text = request.form.get('query', '')
         if query_text:
             try:
+                session_id = get_or_create_session_id()
                 db = get_chroma_db()
-                app_logger.info(f'Query received: {query_text[:50]}...')
+                app_logger.info(f'Query received: {query_text[:50]}... session_id={session_id}')
                 
                 docs = retrieve_and_rerank(query_text, db, top_k=5)
                 app_logger.info(f'Retrieved {len(docs)} documents after reranking')
                 
+                memory_manager = None
+                if MEMORY_ENABLED:
+                    memory_manager = get_memory_manager(session_id)
+                    memory_manager.add_short_term("user", query_text)
+                    app_logger.info("Short-term memory updated")
+                
                 results = [{'content': doc.page_content, 'metadata': doc.metadata} for doc in docs]
-                rag = answer_with_rag(query_text, docs)
+                
+                user_id = session.get('user_id', 'default_user')
+                rag = answer_with_rag(query_text, docs, memory_manager, user_id)
                 answer = rag.answer
                 sources = rag.sources
+                
+                if MEMORY_ENABLED and memory_manager:
+                    memory_manager.add_short_term("assistant", answer)
+                    memory_manager.add_long_term(
+                        content=f"Q: {query_text}\nA: {answer[:200]}",
+                        metadata={"type": "qa_pair", "session_id": session_id}
+                    )
+                    app_logger.info("Memory updated after response")
+                
                 app_logger.info('Query completed successfully')
             except Exception as e:
                 app_logger.exception(f'Query failed: {e}')
                 flash(f'Error searching: {str(e)}')
     
     return render_template('query.html', results=results, answer=answer, sources=sources)
+
+@app.route('/set_user_info', methods=['POST'])
+def set_user_info():
+    if not MEMORY_ENABLED:
+        return jsonify({"status": "error", "message": "Memory module not enabled"}), 500
+    
+    try:
+        session_id = get_or_create_session_id()
+        user_id = request.form.get('user_id', 'default_user')
+        attributes = {
+            "name": request.form.get('name', ''),
+            "preference": request.form.get('preference', ''),
+            "tool": request.form.get('tool', ''),
+            "interest": request.form.get('interest', '')
+        }
+        
+        memory_manager = get_memory_manager(session_id)
+        memory_manager.update_entity(user_id, attributes)
+        session['user_id'] = user_id
+        
+        app_logger.info(f"User info updated: {user_id}")
+        return jsonify({"status": "success", "message": "User info updated"})
+    except Exception as e:
+        app_logger.exception(f"Set user info failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/clear_memory', methods=['POST'])
+def clear_memory():
+    if not MEMORY_ENABLED:
+        return jsonify({"status": "error", "message": "Memory module not enabled"}), 500
+    
+    try:
+        session_id = get_or_create_session_id()
+        memory_manager = get_memory_manager(session_id)
+        memory_manager.clear_short_term()
+        app_logger.info("Short-term memory cleared")
+        return jsonify({"status": "success", "message": "Memory cleared"})
+    except Exception as e:
+        app_logger.exception(f"Clear memory failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'pdf', 'docx'}
@@ -215,4 +316,6 @@ def secure_filename(filename):
     return sanitized
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # Disable debug mode to prevent dual-process memory issue
+    # Debug mode creates a reloader process that doubles memory usage
+    app.run(debug=False, host='0.0.0.0', port=5000)

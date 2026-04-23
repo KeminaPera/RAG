@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 from llm_client import chat_completion
 from logging_config import get_logger
 
@@ -9,10 +9,28 @@ logger = get_logger(__name__)
 try:
     from reranker import BGEReranker
     RERANKER_AVAILABLE = True
+    # Preload reranker instance at module level to avoid loading during request
+    _reranker_instance = None
     logger.info("Reranker 模块加载成功")
 except ImportError as e:
     RERANKER_AVAILABLE = False
+    _reranker_instance = None
     logger.warning(f"Reranker 模块加载失败，将跳过重排序: {e}")
+
+def get_reranker():
+    """Get or create singleton reranker instance"""
+    global _reranker_instance
+    if _reranker_instance is None:
+        _reranker_instance = BGEReranker()
+    return _reranker_instance
+
+try:
+    from memory_manager import MemoryManager
+    MEMORY_AVAILABLE = True
+    logger.info("Memory 模块加载成功")
+except ImportError as e:
+    MEMORY_AVAILABLE = False
+    logger.warning(f"Memory 模块加载失败: {e}")
 
 @dataclass
 class RagAnswer:
@@ -55,7 +73,7 @@ def retrieve_and_rerank(query: str, db, top_k: int = 10) -> List[Any]:
     
     if RERANKER_AVAILABLE:
         logger.info("开始重排序...")
-        reranker = BGEReranker()
+        reranker = get_reranker()
         docs = reranker.rerank(query, docs, top_k=top_k)
         logger.info(f"重排序完成，返回 {len(docs)} 条文档")
     else:
@@ -64,17 +82,39 @@ def retrieve_and_rerank(query: str, db, top_k: int = 10) -> List[Any]:
     
     return docs
 
-def answer_with_rag(question: str, docs: List[Any]) -> RagAnswer:
-    logger.info(f"开始生成回答: 问题='{question[:50]}...', 参考文档数={len(docs)}")
+def answer_with_rag(question: str, docs: List[Any], memory_manager: Optional[MemoryManager] = None, user_id: str = "default_user") -> RagAnswer:
+    logger.info(f"开始生成回答: 问题='{question[:50]}...', 参考文档数={len(docs)}, 记忆可用={MEMORY_AVAILABLE}")
     
     context_text, sources = _format_sources(docs)
 
-    system = (
-        "你是严谨的企业知识库问答助手。你必须只基于给定的【检索上下文】回答。\n"
+    base_system = (
+        "你是严谨的企业知识库问答助手。你必须基于给定的【检索上下文】和记忆信息回答。\n"
         "如果上下文不足以支持结论，必须明确回答：无法从已上传文档中确定，并提出需要补充的信息/澄清问题。\n"
         "回答必须给出引用编号，如 [1][3]，引用必须对应上下文条目。\n"
-        "禁止编造、禁止引入上下文之外的事实。"
+        "禁止编造、禁止引入上下文之外的事实。\n"
+        "请结合用户的实体信息、历史对话和长期知识给出个性化回答。"
     )
+
+    memory_prompt = ""
+    if memory_manager:
+        entity_prompt = memory_manager.get_entity_prompt([user_id])
+        long_term_prompt = memory_manager.get_long_term_prompt(question)
+        short_term_prompt = memory_manager.get_short_term_prompt()
+        
+        memory_parts = []
+        if entity_prompt:
+            memory_parts.append(f"【实体记忆】\n{entity_prompt}")
+        if long_term_prompt:
+            memory_parts.append(f"【长期记忆】\n{long_term_prompt}")
+        if short_term_prompt:
+            memory_parts.append(f"【短期记忆】\n{short_term_prompt}")
+        
+        memory_prompt = "\n\n".join(memory_parts)
+
+    system = base_system
+    if memory_prompt:
+        system = f"{base_system}\n\n{memory_prompt}"
+
     user = (
         f"【用户问题】\n{question}\n\n"
         f"【检索上下文】\n{context_text}\n\n"
@@ -82,6 +122,7 @@ def answer_with_rag(question: str, docs: List[Any]) -> RagAnswer:
         "1) 先给出结论性回答（简洁、可执行）。\n"
         "2) 再给出依据与引用（用 [数字] 标注）。\n"
         "3) 若信息不足，按要求拒答并给出澄清问题。\n"
+        "4) 参考记忆中的用户信息和历史对话，提供个性化回答。\n"
     )
 
     content = chat_completion(

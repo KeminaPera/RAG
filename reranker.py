@@ -3,6 +3,10 @@ import sys
 from typing import List, Tuple, Any
 from logging_config import get_logger
 
+# CRITICAL: Disable parallelism to prevent segmentation fault on Windows
+os.environ["TOKENIZERS_PARALLELISM"] = "false"  # Disable tokenizer parallelism
+os.environ["OMP_NUM_THREADS"] = "1"             # Force single thread for OpenMP
+
 logger = get_logger(__name__)
 
 try:
@@ -12,13 +16,19 @@ except ImportError:
 
 class BGEReranker:
     _instance = None
+    _initialized = False
     
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance.model = None
-            cls._instance._load_model()
         return cls._instance
+    
+    def __init__(self):
+        # Only load model once, even if __init__ is called multiple times
+        if not BGEReranker._initialized:
+            self.model = None
+            self._load_model()
+            BGEReranker._initialized = True
     
     def _load_model(self):
         model_path = os.getenv('RERANKER_MODEL_PATH', './bge-reranker-base')
@@ -32,6 +42,11 @@ class BGEReranker:
         if not candidates:
             logger.info("Rerank: 候选文档为空")
             return []
+        
+        # Ensure model is loaded before using
+        if self.model is None:
+            logger.warning("Rerank: 模型未加载，正在加载...")
+            self._load_model()
         
         logger.info(f"Rerank: 输入查询长度={len(query)}, 候选文档数={len(candidates)}, top_k={top_k}")
         

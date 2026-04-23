@@ -1,49 +1,45 @@
-# ================ 运行时生成文件 ================
-# 日志目录 - 运行时自动生成
+# ================ Runtime Generated Files ================
+# Logs - auto-generated during runtime
 logs/
 *.log
 
-# 上传文件目录 - 用户上传的临时文件
+# Uploaded files - temporary user files
 uploads/
 
-# 向量数据库目录 - 运行时自动创建和更新
-chromadb/
+# Data storage - auto-created during runtime
+data/
 
-# Python编译缓存 - 运行时自动生成
+# Python cache - auto-generated
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# ================ 本地配置文件 ================
-# 环境变量文件 - 包含敏感信息(API密钥等)，不应提交
+# ================ Local Configuration ================
+# Environment variables - contains sensitive info (API keys)
 .env
 
-# VS Code配置 - 个人开发环境配置
+# VS Code settings - personal dev environment
 .vscode/
 
-# Streamlit配置 - 已改用Flask，保留但忽略
-.streamlit/
-
-# ================ 虚拟环境 ================
-# Python虚拟环境 - 用户应自行创建
+# ================ Virtual Environments ================
+# Python virtual environments - should be created by user
 .venv/
 venv/
-.env/
 
-# ================ 模型文件（可选） ================
-# BGE嵌入模型 - 体积较大(~1GB)，建议通过脚本下载
-# 如需包含模型，删除下行注释
+# ================ Model Files (Optional) ================
+# BGE embedding model - large size (~1GB), download via script
+# Uncomment below to exclude from git
 # bge-small-zh-v1.5/
 
-# BGE重排序模型 - 体积较大(~1.5GB)，建议通过脚本下载
-# 如需包含模型，删除下行注释
+# BGE reranker model - large size (~1.5GB), download via script
+# Uncomment below to exclude from git
 # bge-reranker-base/
 
-# ================ 操作系统文件 ================
+# ================ OS Files ================
 .DS_Store
 Thumbs.db
 
-# ================ 其他 ================
+# ================ Other ================
 *.swp
 *.bak
