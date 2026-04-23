@@ -6,18 +6,27 @@ from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 
-from langchain.memory import ConversationSummaryBufferMemory
+from langchain.memory import ConversationSummaryBufferMemory, ConversationBufferMemory
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
 from embeddings import EmbeddingFactory
 
+# Fix for LangChain 0.3.0 + Pydantic 2.x compatibility
+# Try to rebuild model, fallback to ConversationBufferMemory if it fails
+MEMORY_CLASS = None
+MEMORY_CLASS_ERROR = None
+
 try:
-    from langchain.memory import VectorStoreRetrieverMemory
-    from langchain_community.chains import LLMChain
-    from langchain_core.prompts import PromptTemplate
-    VECTOR_MEMORY_AVAILABLE = True
-except ImportError:
-    VECTOR_MEMORY_AVAILABLE = False
+    # Try importing BaseCache to resolve type definitions
+    from langchain_core.caches import BaseCache
+    ConversationSummaryBufferMemory.model_rebuild(force=True)
+    MEMORY_CLASS = ConversationSummaryBufferMemory
+    print("Using ConversationSummaryBufferMemory")
+except Exception as e:
+    MEMORY_CLASS_ERROR = e
+    # Fallback to simpler ConversationBufferMemory
+    MEMORY_CLASS = ConversationBufferMemory
+    print(f"Warning: ConversationSummaryBufferMemory failed ({e}), using ConversationBufferMemory instead")
 
 @dataclass
 class MemoryConfig:
@@ -43,13 +52,27 @@ class ShortTermMemory:
     def __init__(self, config: MemoryConfig = None):
         self.config = config or MemoryConfig()
         self.llm = self._create_llm()
-        self.memory = ConversationSummaryBufferMemory(
-            llm=self.llm,
-            memory_key="chat_history",
-            return_messages=True,
-            output_key="answer",
-            max_token_limit=self.config.short_term_max_token_limit,
-        )
+        
+        # Use the resolved memory class
+        global MEMORY_CLASS
+        if MEMORY_CLASS is None:
+            raise RuntimeError("No memory class available")
+        
+        # Build memory with appropriate class
+        common_kwargs = {
+            "llm": self.llm if MEMORY_CLASS == ConversationSummaryBufferMemory else None,
+            "memory_key": "chat_history",
+            "return_messages": True,
+        }
+        
+        if MEMORY_CLASS == ConversationSummaryBufferMemory:
+            common_kwargs["output_key"] = "answer"
+            common_kwargs["max_token_limit"] = self.config.short_term_max_token_limit
+        
+        # Remove None values
+        common_kwargs = {k: v for k, v in common_kwargs.items() if v is not None}
+        
+        self.memory = MEMORY_CLASS(**common_kwargs)
     
     def _create_llm(self):
         from llm_client import load_llm_config, chat_completion
@@ -116,9 +139,6 @@ class ShortTermMemory:
     
     def clear(self):
         self.memory.chat_memory.clear()
-    
-    def get_memory_variables(self) -> Dict[str, Any]:
-        return self.memory.load_memory_variables({})
 
 @dataclass
 class Entity:
@@ -277,7 +297,7 @@ class LongTermMemory:
             try:
                 with open(self.db_file, "r", encoding="utf-8") as f:
                     self.memory_items = json.load(f)
-            except:
+            except json.JSONDecodeError:
                 self.memory_items = []
     
     def _save(self):

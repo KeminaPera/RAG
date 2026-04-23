@@ -1,13 +1,17 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple, Optional
+import os
 from llm_client import chat_completion
 from logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# Configuration constants
+VECTOR_SEARCH_TOP_K = int(os.getenv('VECTOR_SEARCH_TOP_K', '15'))
+
 try:
-    from reranker import BGEReranker
+    from reranker import RerankerFactory, BaseReranker
     RERANKER_AVAILABLE = True
     # Preload reranker instance at module level to avoid loading during request
     _reranker_instance = None
@@ -17,11 +21,14 @@ except ImportError as e:
     _reranker_instance = None
     logger.warning(f"Reranker 模块加载失败，将跳过重排序: {e}")
 
-def get_reranker():
-    """Get or create singleton reranker instance"""
+def get_reranker() -> BaseReranker:
+    """Get or create singleton reranker instance using Factory pattern"""
     global _reranker_instance
     if _reranker_instance is None:
-        _reranker_instance = BGEReranker()
+        if not RERANKER_AVAILABLE:
+            raise RuntimeError("Reranker 模块不可用")
+        _reranker_instance = RerankerFactory.get_reranker()
+        logger.info(f"Reranker 实例创建完成: {type(_reranker_instance).__name__}")
     return _reranker_instance
 
 try:
@@ -64,7 +71,7 @@ def _format_sources(docs: List[Any]) -> Tuple[str, List[Dict[str, Any]]]:
 def retrieve_and_rerank(query: str, db, top_k: int = 10) -> List[Any]:
     logger.info(f"开始检索: 查询='{query[:50]}...'")
     
-    docs = db.similarity_search(query, k=15)
+    docs = db.similarity_search(query, k=VECTOR_SEARCH_TOP_K)
     logger.info(f"向量检索完成，获取到 {len(docs)} 条候选文档")
     
     if not docs:

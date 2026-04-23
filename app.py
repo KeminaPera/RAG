@@ -1,12 +1,13 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 from flask import jsonify
 import os
-import hashlib
+import secrets
 import json
-import math
 import uuid
 from pathlib import Path
 from dotenv import load_dotenv
+import chromadb
+from chromadb.config import Settings
 
 # CRITICAL: Disable parallelism to prevent segmentation fault on Windows
 # Must be set before importing torch, transformers, or sentence-transformers
@@ -17,10 +18,10 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"        # Disable OpenBLAS threading
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"      # Disable vecLib threading
 os.environ["NUMEXPR_NUM_THREADS"] = "1"         # Disable numexpr threading
 
-from langchain_text_splitters import CharacterTextSplitter
 from langchain_core.documents import Document
 from rag_service import answer_with_rag, retrieve_and_rerank
 from embeddings import EmbeddingFactory
+from text_splitter import TextSplitterFactory
 from logging_config import setup_logging, get_logger
 
 load_dotenv()
@@ -28,10 +29,15 @@ load_dotenv()
 setup_logging(log_level="INFO", log_file="app.log")
 
 app = Flask(__name__)
-app.secret_key = 'supersecretkey'
+# Generate secret key: use env var if set, otherwise generate random key
+secret_key = os.getenv('FLASK_SECRET_KEY', '').strip()
+if not secret_key:
+    secret_key = secrets.token_hex(32)
+app.secret_key = secret_key
 app.config['UPLOAD_FOLDER'] = os.getenv('UPLOAD_FOLDER', './uploads')
-app.config['CHROMA_DB_PATH'] = os.getenv('CHROMA_DB_PATH', './chromadb')
+app.config['CHROMA_DB_PATH'] = os.getenv('CHROMA_DB_PATH', './data/chromadb')
 app.config['PERMANENT_SESSION_LIFETIME'] = 3600
+app.config['MAX_CONTENT_LENGTH'] = int(os.getenv('MAX_UPLOAD_SIZE_MB', '50')) * 1024 * 1024  # 50MB default
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['CHROMA_DB_PATH'], exist_ok=True)
 
@@ -55,60 +61,19 @@ try:
 except Exception as e:
     app_logger.warning(f"Reranker 预加载失败: {e}")
 
-memory_managers = {}
-
-def get_memory_manager(session_id: str) -> MemoryManager:
-    if session_id not in memory_managers:
-        memory_managers[session_id] = MemoryManager(session_id)
-    return memory_managers[session_id]
+# Configuration constants
+TEXT_SPLITTER_TYPE = os.getenv('TEXT_SPLITTER_TYPE', 'recursive').strip().lower()
+CHUNK_SIZE = int(os.getenv('CHUNK_SIZE', '500'))
+CHUNK_OVERLAP = int(os.getenv('CHUNK_OVERLAP', '50'))
+VECTOR_SEARCH_TOP_K = int(os.getenv('VECTOR_SEARCH_TOP_K', '15'))
+RERANK_TOP_K = int(os.getenv('RERANK_TOP_K', '5'))
+MAX_SESSION_CACHE = int(os.getenv('MAX_SESSION_CACHE', '10'))
 
 def get_or_create_session_id():
     if 'session_id' not in session:
         session['session_id'] = str(uuid.uuid4())
         session.permanent = True
     return session['session_id']
-
-class SimpleVectorDB:
-    def __init__(self, persist_directory, collection_name, embedding_function):
-        self.persist_directory = persist_directory
-        self.collection_name = collection_name
-        self.embedding_function = embedding_function
-        self.db_file = os.path.join(self.persist_directory, f"{self.collection_name}.json")
-        self.items = []
-        self._load()
-
-    def _load(self):
-        if os.path.exists(self.db_file):
-            with open(self.db_file, "r", encoding="utf-8") as f:
-                self.items = json.load(f)
-
-    def persist(self):
-        os.makedirs(self.persist_directory, exist_ok=True)
-        with open(self.db_file, "w", encoding="utf-8") as f:
-            json.dump(self.items, f, ensure_ascii=False)
-
-    def add_documents(self, documents):
-        texts = [doc.page_content for doc in documents]
-        vectors = self.embedding_function.embed_documents(texts)
-        for doc, vector in zip(documents, vectors):
-            self.items.append({
-                "content": doc.page_content,
-                "metadata": doc.metadata or {},
-                "embedding": vector
-            })
-
-    def similarity_search(self, query_text, k=5):
-        query_vec = self.embedding_function.embed_query(query_text)
-        query_norm = math.sqrt(sum(v * v for v in query_vec)) or 1.0
-        scored = []
-        for item in self.items:
-            vec = item["embedding"]
-            vec_norm = math.sqrt(sum(v * v for v in vec)) or 1.0
-            score = sum(a * b for a, b in zip(query_vec, vec)) / (query_norm * vec_norm)
-            scored.append((score, item))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        top_items = scored[:k]
-        return [Document(page_content=i["content"], metadata=i["metadata"]) for _, i in top_items]
 
 embeddings = None
 
@@ -134,6 +99,48 @@ def get_embeddings():
         )
     return embeddings
 
+# LRU Cache for MemoryManager to prevent memory leak
+from collections import OrderedDict
+
+class MemoryManagerCache:
+    """LRU Cache for MemoryManager with max size limit"""
+    def __init__(self, max_size=10):
+        self.max_size = max_size
+        self.cache = OrderedDict()
+    
+    def get(self, session_id: str) -> MemoryManager:
+        if session_id in self.cache:
+            self.cache.move_to_end(session_id)  # Mark as recently used
+            return self.cache[session_id]
+        return None
+    
+    def put(self, session_id: str, manager: MemoryManager):
+        if session_id in self.cache:
+            self.cache.move_to_end(session_id)
+        else:
+            if len(self.cache) >= self.max_size:
+                # Remove least recently used
+                oldest_session = next(iter(self.cache))
+                del self.cache[oldest_session]
+                app_logger.info(f"MemoryManager cache evicted: {oldest_session}")
+            self.cache[session_id] = manager
+    
+    def clear(self, session_id: str = None):
+        if session_id:
+            self.cache.pop(session_id, None)
+        else:
+            self.cache.clear()
+
+memory_cache = MemoryManagerCache(max_size=MAX_SESSION_CACHE)
+
+def get_memory_manager(session_id: str) -> MemoryManager:
+    manager = memory_cache.get(session_id)
+    if manager is None:
+        manager = MemoryManager(session_id)
+        memory_cache.put(session_id, manager)
+        app_logger.info(f"MemoryManager created for session: {session_id}, cache size: {len(memory_cache.cache)}")
+    return manager
+
 def load_document(file_path):
     if file_path.endswith('.pdf'):
         try:
@@ -152,29 +159,124 @@ def load_document(file_path):
     return loader.load()
 
 def split_documents(documents):
-    text_splitter = CharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50,
-        length_function=len
+    """Split documents using TextSplitter Factory"""
+    # Get embeddings for semantic splitters (if needed)
+    embeddings = None
+    if TEXT_SPLITTER_TYPE in ['semantic']:
+        embeddings = get_embeddings()
+        app_logger.info(f"Using semantic splitting with {type(embeddings).__name__}")
+    
+    # Create splitter using factory
+    text_splitter = TextSplitterFactory.get_splitter(
+        splitter_type=TEXT_SPLITTER_TYPE,
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+        embeddings=embeddings
     )
+    
+    app_logger.info(f"TextSplitter: {TEXT_SPLITTER_TYPE} (chunk_size={CHUNK_SIZE}, overlap={CHUNK_OVERLAP})")
     return text_splitter.split_documents(documents)
 
+def get_chroma_client():
+    """Get or create ChromaDB client singleton"""
+    if not hasattr(get_chroma_client, '_client'):
+        get_chroma_client._client = chromadb.PersistentClient(
+            path=app.config['CHROMA_DB_PATH'],
+            settings=Settings(
+                anonymized_telemetry=False,
+                # Disable ChromaDB's default embedding function
+                # We'll use our own BGE embedding
+            )
+        )
+    return get_chroma_client._client
+
 def save_to_chroma(chunks, collection_name="documents"):
-    db = SimpleVectorDB(
-        persist_directory=app.config['CHROMA_DB_PATH'],
-        collection_name=collection_name,
-        embedding_function=get_embeddings(),
+    """Save documents to ChromaDB"""
+    client = get_chroma_client()
+    
+    # Create ChromaDB-compatible embedding function adapter
+    class EmbeddingFunctionAdapter:
+        def __init__(self, embedding_instance):
+            self.embedding = embedding_instance
+        
+        def __call__(self, input):
+            if isinstance(input, str):
+                return self.embedding.embed_query(input)
+            else:
+                return self.embedding.embed_documents(input)
+    
+    chroma_embedding = EmbeddingFunctionAdapter(get_embeddings())
+    
+    # Get or create collection
+    try:
+        collection = client.get_collection(collection_name)
+    except:
+        collection = client.create_collection(
+            name=collection_name,
+            embedding_function=chroma_embedding
+        )
+    
+    # Prepare data for batch insertion
+    texts = [chunk.page_content for chunk in chunks]
+    metadatas = [chunk.metadata or {} for chunk in chunks]
+    ids = [f"doc_{uuid.uuid4()}" for _ in chunks]
+    
+    # Add to ChromaDB
+    collection.add(
+        documents=texts,
+        metadatas=metadatas,
+        ids=ids
     )
-    db.add_documents(chunks)
-    db.persist()
-    return db
+    app_logger.info(f"Saved {len(chunks)} chunks to ChromaDB collection: {collection_name}")
+    return collection
 
 def get_chroma_db(collection_name="documents"):
-    return SimpleVectorDB(
-        persist_directory=app.config['CHROMA_DB_PATH'],
-        collection_name=collection_name,
-        embedding_function=get_embeddings(),
-    )
+    """Get ChromaDB collection for querying"""
+    client = get_chroma_client()
+    
+    # Create ChromaDB-compatible embedding function adapter
+    class EmbeddingFunctionAdapter:
+        def __init__(self, embedding_instance):
+            self.embedding = embedding_instance
+        
+        def __call__(self, input):
+            # ChromaDB expects 'input' parameter
+            if isinstance(input, str):
+                return self.embedding.embed_query(input)
+            else:
+                return self.embedding.embed_documents(input)
+    
+    chroma_embedding = EmbeddingFunctionAdapter(get_embeddings())
+    
+    try:
+        collection = client.get_collection(collection_name)
+    except:
+        # Return empty collection if not exists
+        collection = client.create_collection(
+            name=collection_name,
+            embedding_function=chroma_embedding
+        )
+    
+    # Wrap collection to provide similarity_search interface
+    class ChromaDBWrapper:
+        def __init__(self, collection):
+            self.collection = collection
+        
+        def similarity_search(self, query, k=5):
+            results = self.collection.query(
+                query_texts=[query],
+                n_results=k,
+                include=["documents", "metadatas"]
+            )
+            
+            docs = []
+            if results['documents'] and results['documents'][0]:
+                for i, content in enumerate(results['documents'][0]):
+                    metadata = results['metadatas'][0][i] if results['metadatas'] else {}
+                    docs.append(Document(page_content=content, metadata=metadata))
+            return docs
+    
+    return ChromaDBWrapper(collection)
 
 @app.route('/')
 def index():
@@ -235,7 +337,7 @@ def query():
                 db = get_chroma_db()
                 app_logger.info(f'Query received: {query_text[:50]}... session_id={session_id}')
                 
-                docs = retrieve_and_rerank(query_text, db, top_k=5)
+                docs = retrieve_and_rerank(query_text, db, top_k=RERANK_TOP_K)
                 app_logger.info(f'Retrieved {len(docs)} documents after reranking')
                 
                 memory_manager = None
