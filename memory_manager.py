@@ -6,12 +6,13 @@ from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 
-from langchain.memory import ConversationSummaryBufferMemory, ConversationBufferMemory
+# LangChain 1.x: Memory moved to langchain-classic
+from langchain_classic.memory import ConversationSummaryBufferMemory, ConversationBufferMemory
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
 from embeddings import EmbeddingFactory
 
-# Fix for LangChain 0.3.0 + Pydantic 2.x compatibility
+# Fix for LangChain 1.x + Pydantic 2.x compatibility
 # Try to rebuild model, fallback to ConversationBufferMemory if it fails
 MEMORY_CLASS = None
 MEMORY_CLASS_ERROR = None

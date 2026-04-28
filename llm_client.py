@@ -48,7 +48,8 @@ def load_llm_config() -> LLMConfig:
     model = os.getenv("LLM_MODEL", "gpt-4o-mini").strip()
     base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
     api_key = os.getenv("LLM_API_KEY", "").strip()
-    timeout_s = int(os.getenv("LLM_TIMEOUT_S", "60"))
+    # 支持 LLM_TIMEOUT_S 或 LLM_CLIENT_TIMEOUT 两个环境变量
+    timeout_s = int(os.getenv("LLM_CLIENT_TIMEOUT", os.getenv("LLM_TIMEOUT_S", "120")))
     return LLMConfig(provider=provider, model=model, base_url=base_url, api_key=api_key, timeout_s=timeout_s)
 
 
