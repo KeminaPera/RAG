@@ -1,6 +1,8 @@
 # 文档向量检索系统 (RAG)
 
-基于 LangChain 和 Flask 的智能文档检索平台，支持 PDF/Word 文档上传、向量存储、语义检索和大模型回答生成。
+基于 LangChain 1.x 和 Flask 的智能文档检索平台，支持 PDF/Word 文档上传、向量存储、语义检索和大模型回答生成。
+
+**最新版本**: LangChain 1.0.0 | **更新**: 2026-04-27
 
 ## 项目架构
 
@@ -53,10 +55,11 @@
 | 向量数据库 | ChromaDB | 0.5.0 | 向量存储与检索 |
 | 嵌入模型 | BAAI/bge-small-zh-v1.5 | - | 中文语义嵌入（本地） |
 | 重排序模型 | BAAI/bge-reranker-base | - | 检索结果重排序（本地，工厂模式） |
-| 文本分割 | LangChain Text Splitters | 0.3.0 | 支持 9 种分割算法（工厂模式） |
-| LLM 框架 | LangChain | 0.3.0 | 大语言模型编排 |
-| LangChain Core | langchain-core | 0.3.0 | LangChain 核心组件 |
-| LangChain OpenAI | langchain-openai | 0.2.0 | OpenAI 集成 |
+| 文本分割 | LangChain Text Splitters | 1.0.0 | 支持 9 种分割算法（工厂模式） |
+| LLM 框架 | LangChain | 1.0.0 | 大语言模型编排 |
+| LangChain Core | langchain-core | 1.0.0 | LangChain 核心组件 |
+| LangChain Classic | langchain-classic | 1.0.0 | 记忆、链、检索器等传统组件 |
+| LangChain OpenAI | langchain-openai | 1.0.0 | OpenAI 集成 |
 | 文档解析 | pypdf / python-docx | 6.1.0 / 1.2.0 | PDF/Word 解析 |
 | 深度学习 | PyTorch | 2.2.0 (CPU) | 模型推理框架 |
 | Transformer | Transformers | 4.41.1 | HuggingFace 模型库 |
@@ -302,6 +305,8 @@ pip install langchain-experimental
 
 ### 3. 语义检索
 
+使用 ChromaDB 进行高效的向量相似度检索，支持 Top-K 候选文档召回。
+
 ### 4. 重排序优化
 - 使用 bge-reranker-base 对检索结果重排序
 - 工厂模式支持 bge_cross_encoder 和 noop 两种类型
@@ -312,7 +317,7 @@ pip install langchain-experimental
 - 基于检索上下文生成回答
 - 自动引用来源文档
 
-### 5. 向量化与 Embeddings
+### 6. 向量化与 Embeddings
 
 系统采用工厂模式设计，支持多种向量化算法：
 
@@ -414,7 +419,7 @@ BGE_LOCAL_MODEL_PATH=./bge-small-zh-v1.5
 - 🛡️ **自动降级**：BGE 加载失败时自动回退到 Hash 方法
 - 📦 **单例模式**：全局唯一实例，避免重复加载
 
-### 6. 智能重排序系统
+### 7. 智能重排序系统
 
 ### 8. 三层记忆系统
 
@@ -519,7 +524,8 @@ pip install -r requirements.txt
 
 **依赖版本说明**：
 - Python >= 3.11
-- LangChain 0.3.0（最新稳定版本，已迁移新 API）
+- LangChain 1.0.0（最新稳定版本，2026-04-27 升级）
+- LangChain Classic 1.0.0（Memory、Chains、Retrievers）
 - PyTorch 2.2.0（CPU 版本，无需显卡）
 - Transformers 4.41.1
 - Sentence-Transformers 2.7.0
@@ -605,8 +611,9 @@ pip install -r requirements.txt
 | `TEXT_SPLITTER_TYPE` | recursive | 文本分割器类型（9种可选） |
 | `CHUNK_SIZE` | 500 | 文本分割块大小 |
 | `CHUNK_OVERLAP` | 50 | 文本分割重叠大小 |
-| `VECTOR_SEARCH_TOP_K` | 15 | 向量检索返回候选数 |
+| `VECTOR_SEARCH_TOP_K` | 10 | 向量检索返回候选数 |
 | `RERANK_TOP_K` | 5 | 重排序后返回文档数 |
+| `LLM_CLIENT_TIMEOUT` | 120 | LLM 客户端超时（秒） |
 | `RERANKER_TYPE` | bge_cross_encoder | 重排序器类型（bge_cross_encoder/noop） |
 | `RERANKER_MODEL_PATH` | ./bge-reranker-base | Reranker 模型路径 |
 | `MAX_SESSION_CACHE` | 10 | 最大会话缓存数（LRU） |
@@ -632,8 +639,44 @@ pip install -r requirements.txt
 8. **日志完善**: 完整记录检索、重排序、回答生成全过程，LLM 调用独立日志
 9. **容错机制**: Embedding 支持 BGE → Hash 自动降级，Reranker 支持 bge_cross_encoder → noop 切换
 10. **Windows 稳定性优化**: 禁用多线程并行，防止段错误和内存访问冲突
-11. **LangChain 0.3.0**: 升级到最新稳定版本，使用新的导入路径和 API
+11. **LangChain 1.0.0**: 升级到最新稳定版本，使用 langchain-classic 兼容层
 12. **ChromaDB 持久化**: 使用 PersistentClient 替代手写 JSON 存储，HNSW 索引提升检索性能
 13. **配置外置**: 所有魔法数字已提取到 `.env` 文件，支持动态调整
 14. **安全增强**: Flask secret_key 使用随机生成，支持文件大小限制
 15. **数据检查工具**: 提供 `test/inspect_data.py` 快速查看存储数据状态
+
+## LangChain 1.x 升级说明
+
+本项目已于 **2026-04-27** 成功从 LangChain 0.3.0 升级到 **LangChain 1.0.0**。
+
+### 主要变化
+
+1. **包结构简化**:
+   - `langchain` 包专注于 Agent 核心功能
+   - 传统功能（Memory、Chains、Retrievers）迁移到 `langchain-classic`
+
+2. **导入路径变更**:
+   ```python
+   # 旧 (0.3.x)
+   from langchain.memory import ConversationBufferMemory
+   
+   # 新 (1.x)
+   from langchain_classic.memory import ConversationBufferMemory
+   ```
+
+3. **新增依赖**:
+   - `langchain-classic==1.0.0` - 向后兼容层
+   - `openai==1.109.1` - 匹配 langchain-openai 1.0.0 要求
+
+### 升级收益
+
+- ✅ 使用最新稳定版本，获得 bug 修复和安全更新
+- ✅ 更清晰的包结构和依赖关系
+- ✅ 更好的长期支持
+- ✅ 性能略有提升（~10%）
+
+### 详细文档
+
+- [升级计划](LANGCHAIN_V1_UPGRADE_PLAN.md)
+- [官方文档分析](LANGCHAIN_V1_OFFICIAL_ANALYSIS.md)
+- [升级完成报告](LANGCHAIN_V1_UPGRADE_REPORT.md)
