@@ -88,9 +88,13 @@ class BGEReranker(BaseReranker):
         # 构建 (query, document) 对
         pairs = [(query, doc.page_content) for doc in candidates]
         
-        # 计算相关性分数
+        # 计算相关性分数（使用 batch_size 优化性能）
         logger.info("BGE Rerank: 开始计算相关性分数...")
-        scores = self.model.predict(pairs)
+        scores = self.model.predict(
+            pairs,
+            batch_size=8,  # 优化 batch size 提升 CPU 性能
+            show_progress_bar=False  # 禁用进度条减少日志噪音
+        )
         logger.info(f"BGE Rerank: 分数计算完成，分数范围: [{scores.min():.4f}, {scores.max():.4f}]")
         
         # 排序并返回 top_k

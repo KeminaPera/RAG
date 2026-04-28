@@ -6,6 +6,11 @@ import json
 import uuid
 from pathlib import Path
 from dotenv import load_dotenv
+
+# CRITICAL: Disable ChromaDB telemetry to avoid API errors
+os.environ['ANONYMIZED_TELEMETRY'] = 'False'
+os.environ['CHROMA_TELEMETRY'] = 'disabled'
+
 import chromadb
 from chromadb.config import Settings
 
@@ -65,8 +70,9 @@ except Exception as e:
 TEXT_SPLITTER_TYPE = os.getenv('TEXT_SPLITTER_TYPE', 'recursive').strip().lower()
 CHUNK_SIZE = int(os.getenv('CHUNK_SIZE', '500'))
 CHUNK_OVERLAP = int(os.getenv('CHUNK_OVERLAP', '50'))
-VECTOR_SEARCH_TOP_K = int(os.getenv('VECTOR_SEARCH_TOP_K', '15'))
+VECTOR_SEARCH_TOP_K = int(os.getenv('VECTOR_SEARCH_TOP_K', '10'))
 RERANK_TOP_K = int(os.getenv('RERANK_TOP_K', '5'))
+LLM_CLIENT_TIMEOUT = int(os.getenv('LLM_CLIENT_TIMEOUT', '120'))
 MAX_SESSION_CACHE = int(os.getenv('MAX_SESSION_CACHE', '10'))
 
 def get_or_create_session_id():
